@@ -1,0 +1,11 @@
+name: "🧪 Test"
+description: "테스트 코드 작성 및 QA 작업"
+title: "[TEST] "
+labels: [ "Test" ]
+body:
+  - type: textarea
+    attributes:
+      label: 🧪 테스트 작업 내용
+      placeholder: 테스트할 대상과 작성한 테스트 내용을 적어주세요.
+    validations:
+      required: true

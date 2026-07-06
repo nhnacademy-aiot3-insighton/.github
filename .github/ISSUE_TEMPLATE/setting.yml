@@ -1,0 +1,11 @@
+name: "⚙️ Setting"
+description: "프로젝트 환경 설정 및 의존성 변경"
+title: "[SETTING] "
+labels: [ "Setting" ]
+body:
+  - type: textarea
+    attributes:
+      label: ⚙️ 설정 변경 내용
+      placeholder: 변경된 환경 설정이나 추가된 라이브러리 등을 적어주세요.
+    validations:
+      required: true

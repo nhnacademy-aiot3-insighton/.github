@@ -1,0 +1,11 @@
+name: "❓ Question"
+description: "의문점 및 질문 사항"
+title: "[QUESTION] "
+labels: [ "Question" ]
+body:
+  - type: textarea
+    attributes:
+      label: 🤔 질문 내용
+      placeholder: 궁금한 점이나 논의할 내용을 자유롭게 적어주세요.
+    validations:
+      required: true

@@ -1,0 +1,11 @@
+name: "📝 Docs"
+description: "개발 문서 작성 및 수정 작업"
+title: "[DOCS] "
+labels: [ "Docs" ]
+body:
+  - type: textarea
+    attributes:
+      label: ✍️ 문서 작업 내용
+      placeholder: 작성하거나 수정한 문서의 내용과 위치를 설명해 주세요.
+    validations:
+      required: true

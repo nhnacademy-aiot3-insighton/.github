@@ -1,0 +1,11 @@
+name: "📦 Deploy"
+description: "배포 작업 및 릴리즈"
+title: "[DEPLOY] "
+labels: [ "Deploy" ]
+body:
+  - type: textarea
+    attributes:
+      label: 📝 배포 정보 및 작업 목록
+      placeholder: 배포 환경, 버전 및 필요 작업(DB 마이그레이션 등)을 적어주세요.
+    validations:
+      required: true

@@ -1,0 +1,17 @@
+name: "🐛 Bug Fix"
+description: "버그/오류 수정 작업"
+title: "[BUGFIX] "
+labels: [ "Bug" ]
+body:
+  - type: textarea
+    attributes:
+      label: 🔍 발생한 버그 및 원인
+      placeholder: 어떤 문제가 발생했고, 원인이 무엇인지 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 🛠️ 수정 내용
+      placeholder: 어떻게 수정했는지 간략히 적어주세요.
+    validations:
+      required: true
