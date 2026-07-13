@@ -1,0 +1,32 @@
+# .github/ISSUE_TEMPLATE/refactor.yml
+name: "🔧 Refactor"
+description: "코드 구조 개선 및 품질 향상"
+labels: [ "Refactor" ]
+body:
+  - type: textarea
+    attributes:
+      label: 🎯 목적
+      description: 리팩터링으로 얻고자 하는 목표를 작성해 주세요.
+      placeholder: 가독성, 결합도 감소, 테스트 용이성 등
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 🧩 대상 범위
+      description: 패키지/모듈/파일 등 범위를 명시해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: ✅ 수용 기준(AC)
+      description: 완료 판단 기준을 체크리스트로 작성해 주세요.
+      placeholder: |
+        - [ ] 메소드 라인 수 50줄 이하
+        - [ ] 순환 복잡도 10 이하
+        - [ ] Sonar 경고 0
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: ⚠️ 리스크/주의사항
+      description: 사이드 이펙트, 성능 영향, 마이그레이션 포인트 등
