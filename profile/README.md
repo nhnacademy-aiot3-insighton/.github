@@ -70,6 +70,7 @@ InsightOn은 오피스 공간에 설치된 IoT 센서·액추에이터를 실시
 - **자동화의 2단계 구조**: 사람이 정한 명시적 규칙(규칙 기반 자동화)과, 상황을 스스로 해석해 선제적으로 판단하는 AI 자동 제어를 모두 제공
 - **맥락 있는 판단**: 실내 데이터뿐 아니라 실시간 날씨·미세먼지까지 결합해 "왜 이 조치가 필요한지"를 자연어로 설명
 - **멀티테넌트 격리**: 고객사별 데이터와 인프라가 완전히 분리되어 한 회사의 장애·트래픽 폭증이 다른 회사에 영향을 주지 않음
+- **규칙 엔진 이중화**: Rule Engine은 고정 2인스턴스 active-active로 운영되어, 한 인스턴스 장애 시에도 자동화 처리가 끊기지 않음
 
 </details>
 
@@ -96,16 +97,18 @@ InsightOn은 오피스 공간에 설치된 IoT 센서·액추에이터를 실시
 
 #### 2.3 규칙 기반 자동화 (담당: ENGINE)
 
+> ⚠️ 아래 내용은 Rule Engine 상세 설계(파티션 라우팅·이중화·Redis 상태 관리)를 반영해 갱신되었습니다. 자세한 내용은 하단 [파트별 아키텍처 — Engine](#-파트별-아키텍처--engine-rule-engine) 참고.
+
 | ID | 요구사항 | 상세 설명 / 수용 기준 | 우선순위 | 의존성 |
 |---|---|---|---|---|
-| FR-06 | 노코드 플로우 빌더 | 트리거 1개 → 필터 0개 이상(직렬 체이닝=AND) → 액션 1개 이상(병렬 가능)을 드래그앤드롭으로 구성. 저장 시 `flows`/`nodes`/`links`로 영속화, `is_active` 토글로 즉시 활성/비활성 | Must | Rule Engine 엔티티 계층 |
-| FR-07 | 센서 임계치 트리거 | `SENSOR_TRIGGER` — 특정 공간(선택적으로 특정 기기/메트릭)의 텔레메트리 도착 시 발화. RabbitMQ `telemetry.#` 소비 후 인메모리 인덱스로 O(1) 조회 | Must | Core→RabbitMQ 발행 파이프라인 |
+| FR-06 | 노코드 플로우 빌더 | TRIGGER_NODE 1개 → FILTER_NODE 0개 이상 → ACTION_NODE 1개 이상으로 구성되는 DAG(순환 없음, 저장 시점 검증). `flows`/`nodes`/`links`로 영속화, `status`(DRAFT/ACTIVE/INACTIVE/ARCHIVED) 토글로 활성 제어 | Must | Rule Engine 엔티티 계층 |
+| FR-07 | 센서 임계치 트리거 | `SENSOR_TRIGGER` — 공간(location_id) 단위로 발화. Core가 RabbitMQ **Consistent Hash Exchange**에 `location_id`를 routing key로 발행하면, 같은 location_id는 항상 같은 고정 파티션(Q1: 홀수 대역 / Q2: 짝수 대역)으로 분리되어 각 Rule Engine 인스턴스가 자기 파티션만 소비. 인스턴스별 Redis Flow 캐시(`location_id → List<Flow>`)의 로컬 사본으로 O(1) 조회 | Must | Core→RabbitMQ 발행 파이프라인, Consistent Hash Exchange 플러그인 |
 | FR-08 | 스케줄 트리거 | `SCHEDULE_TRIGGER` — cron 표현식 기반 실행(예: 출근 시간 예열). 텔레메트리 이벤트 없이도 다운스트림 실행 | Should | Rule Engine 자체 스케줄러 |
-| FR-09 | 조건 필터 | `THRESHOLD_FILTER`(SpEL 조건식), `TIME_WINDOW_FILTER`(시간대 제한) | Must | SpEL 평가기 |
-| FR-10 | 반복 제어/알림 빈도 제한 | `TIMER_FILTER` — 지정 주기(`interval_seconds`)당 최초 1회만 통과, 그 사이 도착 메시지는 드롭(몰아서 처리 안 함). 상태는 `(node_uuid, locations_id/devices_id)` 조합별 독립, 인메모리(재시작 시 초기화는 의도된 동작) | Should | 단일 인스턴스 전제 — **다중 인스턴스 확장 시 Redis 공유 상태로 이전 필요(현재 스코프 아님)** |
-| FR-11 | 규칙 기반 기기 제어 | `DEVICE_CONTROL_ACTION` — AI 개입 없이 Core 제어 API 직접 호출. `simulator_run_logs.executed_by_type='RULE_ENGINE'`로 기록 | Must | Core 제어 API |
+| FR-09 | 조건 필터 | `THRESHOLD_FILTER`(SpEL 조건식, `SimpleEvaluationContext`로 제한해 임의 코드 실행 차단), `TIME_WINDOW_FILTER`(시간대 제한). 다중 조건 결합은 두 패턴으로 구분: **Filter(Multi-AND)** — 한 센서가 한 패킷에 담은 여러 필드를 그 센서가 실제 전송하는 필드 개수만큼 동적으로 순차 평가(상태 저장 불필요, 같은 패킷이라 지연 도착 없음). **Filter(AND, cross-sensor)** — 서로 다른 센서(최대 3개)의 비동기 값을 correlation key(`flow_id+node_id+location_id`) 기준 Redis에 SET/DEL로 즉시 반영해 판별(값 만료는 노드 설정값 TTL, 센서 전송 주기가 비일관적이라 근거값 아님) | Must | SpEL 평가기, Redis |
+| FR-10 | 반복 제어/알림 빈도 제한 | `TIMER_FILTER` — 지정 주기(`interval_seconds`)당 최초 1회만 통과. 상태는 `(node_id, location_id)` 조합별 **Redis에 `SET fired:{key} true EX <ttl> NX`로 원자적으로 관리**(다중 인스턴스 간 공유, 인메모리 아님). 조건이 깨지면(재조회 시 유효값 없음) 즉시 `DEL`로 리셋. Rule Engine은 고정 2인스턴스(active-active)로 상시 운영되며, 이 상태 공유가 그 전제 | Should | Redis(공유 상태 저장소) |
+| FR-11 | 규칙 기반 기기 제어 | `DEVICE_CONTROL_ACTION` — AI 개입 없이 Core 제어 API 직접 호출(Feign, 동기). `simulator_run_logs.executed_by_type='RULE_ENGINE'`로 기록 | Must | Core 제어 API |
 | FR-12 | 즉시 알림 | `ALERT_ACTION` — LLM 없이 즉시 `dashboard_alerts` 생성 | Must | AI 서비스 알람 생성 API |
-| FR-13 | AI 위임 | `AI_SUGGESTION_ACTION` — 실행 컨텍스트를 AI 서비스로 이벤트 발행 | Must | AI 서비스 이벤트 리스너 |
+| FR-13 | AI 위임 | `AI_SUGGESTION_ACTION` — 실행 컨텍스트를 AI 서비스로 이벤트 발행(비동기) | Must | AI 서비스 이벤트 리스너 |
 | FR-14 | 외부 채널 알림 | `EXTERNAL_NOTIFICATION_ACTION` — Telegram/이메일. 발송은 베스트 에포트(실패 시 재시도/영구 기록 없음, 확정 사항) | Should | Telegram Bot API / SMTP 연동 |
 
 #### 2.4 AI 지능형 제어 (담당: CORE, AI, API)
@@ -163,6 +166,8 @@ InsightOn은 오피스 공간에 설치된 IoT 센서·액추에이터를 실시
 | NFR-08 | 보안 | 유출된 초대 토큰 즉시 무효화 | 재발급 즉시 이전 토큰으로 가입 시도 시 실패 응답 확인 | Must |
 | NFR-09 | 데이터 무결성 | 동일 물리 DB 내 실제 FK 제약 | 각 서비스 ERD 갭 표 반영한 DDL에 FK 제약이 실제로 걸려 있는지 확인 | Must |
 | NFR-10 | 오버 엔지니어링 회피 | 불필요한 이력 저장/과도한 트랜잭션 보장 지양 | 게이트웨이/기기 상태 이력 테이블 미생성, 알림 발송 로그 미보관 등 확정 사항 유지 | Should |
+| NFR-11 | Rule Engine 이중화 | 고정 2인스턴스 active-active, 하나가 다운되어도 나머지가 전체 트래픽 흡수 | Redis TTL 기반 Heartbeat로 상대 인스턴스 생존 감지(초 단위), 소실 시 상대방 파티션 큐 즉시 흡수, 복구 시 연속 5회(약 5초) 안정 확인 후 반납(flapping 방지) | Must |
+| NFR-12 | Rule Engine 확장성 범위 | 현재 트래픽 규모에서 3개 이상 인스턴스로 동적 확장 미지원 | 의도적 스코프 제한, 트래픽 실측 후 재검토 | Should |
 
 #### 2.10 미확정 항목 (임의 결정 금지 — 팀 논의 필요)
 
@@ -173,6 +178,8 @@ InsightOn은 오피스 공간에 설치된 IoT 센서·액추에이터를 실시
 | 게이트웨이 하트비트 임계 시간 | FR-04 | 구체적 수치 미정 |
 | OAuth 제공자 목록 | FR-26 | 구체적 목록 미정 |
 | 역할별 접근 권한 매트릭스 | FR-25 | 화면/API 단위 매핑표 별도 필요 |
+| Filter(AND, cross-sensor)의 TTL 근거값 | FR-09 | 센서 전송 주기가 비일관적으로 확인되어 현재는 노드 설정값(임시값)으로 대체. 실측 데이터 확보 후 재산정 |
+| Rule Engine의 센서 필드 스키마 참조 방식 | FR-09(Filter Multi-AND) | Core의 devices/device_attributes를 API 호출로 참조할지, 이벤트 기반 캐시로 참조할지 미확정 |
 
 </details>
 
@@ -183,7 +190,7 @@ InsightOn은 오피스 공간에 설치된 IoT 센서·액추에이터를 실시
 - **실시간 관제 대시보드**: 공간별 커스텀 위젯 대시보드, 실시간 시계열 차트
 - **인프라 및 기기 관리**: 게이트웨이/기기 등록·상태 조회, 신규 기기 자동 인식
 - **액추에이터 원격 제어**: 대시보드에서 수동 ON/OFF 및 모드 제어
-- **노코드 자동화(규칙 엔진)**: 트리거 → 조건 필터 → 액션 드래그앤드롭 플로우 빌더 (센서 임계치/스케줄 트리거, 조건식/시간대/빈도 제한 필터, 기기 제어·알림·AI 요청 액션)
+- **노코드 자동화(규칙 엔진)**: 트리거 → 조건 필터 → 액션 DAG 플로우 빌더 (센서 임계치/스케줄 트리거, 조건식/시간대/빈도 제한 필터, 같은 센서 다중필드 AND·서로 다른 센서 간 AND 두 종류 지원, 기기 제어·알림·AI 요청 액션), **Rule Engine 고정 2인스턴스 이중화**
 - **AI 지능형 제어**: 공간별 운영 모드 선택, 날씨·미세먼지 결합 상황 인지형 제안, 인과관계가 담긴 자연어 가이드
 - **알림**: 대시보드 실시간 알람 피드, Telegram/이메일 외부 알림
 - **리포트 및 분석**: 시간별 통계 집계, 주간/월간 AI 정밀 진단 리포트
@@ -216,13 +223,14 @@ flowchart TB
         GW["Gateway<br/>단일 진입점 · 라우팅/부하분산"]
         Auth["Auth 서비스"]
         Core["Core 서비스<br/>MQTT 수집·가공, 대시보드·제어 API"]
-        RE["Rule Engine 서비스<br/>워크플로우 저장, SpEL 조건 평가"]
+        RE["Rule Engine 서비스<br/>고정 2인스턴스, 워크플로우 저장·평가"]
         AI["AI/분석 서비스<br/>통계 결산, LLM 제안/리포트"]
 
         AuthDB[("Auth PostgreSQL")]
         CoreDB[("Core PostgreSQL")]
         Influx[("InfluxDB")]
         REDB[("Rule Engine PostgreSQL")]
+        RERedis[("Rule Engine Redis<br/>Flow 캐시·Heartbeat·AND 상태")]
         AIDB[("AI PostgreSQL")]
         MQ{{"RabbitMQ<br/>Topic Exchange"}}
     end
@@ -240,6 +248,7 @@ flowchart TB
     Core -- "발행 telemetry.{groups_id} ○" --> MQ
     MQ -- "구독 telemetry.# ○" --> RE
     RE --- REDB
+    RE --- RERedis
     RE -- "제어 API 호출 ●(Feign)" --> Core
     RE -- "이벤트 발행/API 호출 ○●" --> AI
     RE -- "외부 알림 ○(베스트에포트)" --> Notify
@@ -254,7 +263,7 @@ flowchart TB
 | Gateway | 단일 진입점, 라우팅/부하분산 | - |
 | Auth | 인증/인가 | 독립 PostgreSQL |
 | Core | MQTT 수집·가공, 인프라 장부, 대시보드 API, 액추에이터 제어 | Core PostgreSQL + InfluxDB |
-| Rule Engine | 워크플로우 저장, 실시간 SpEL 조건 평가 | 독립 PostgreSQL |
+| Rule Engine | 워크플로우 저장, 실시간 SpEL 조건 평가, **고정 2인스턴스 active-active 이중화** | 독립 PostgreSQL + Redis |
 | AI/분석 | 정각 통계 결산, 실시간 제어 제안, LLM 리포트 | 독립 PostgreSQL |
 
 **연동 원칙**: 서비스 간 물리 DB는 완전히 분리(Database-per-Service)되며, 물리 FK 대신 애플리케이션 레이어의 논리 키 매핑으로 연동한다. 동일 서비스 내부(같은 물리 DB) 테이블 간에는 실제 FK 제약을 건다. 서비스 간 동기 호출은 OpenFeign, 비동기 전파는 RabbitMQ만 사용한다.
@@ -268,6 +277,7 @@ sequenceDiagram
     participant Influx as InfluxDB
     participant MQ as RabbitMQ(telemetry.#)
     participant RE as Rule Engine
+    participant Redis as Rule Engine Redis
     participant Notify as Telegram/SMTP
 
     Sensor->>Core: MQTT 패킷 발행
@@ -278,8 +288,11 @@ sequenceDiagram
         Core->>MQ: 정제 DTO 발행 (routing key: telemetry.{groups_id})
     end
     MQ->>RE: telemetry.# 와일드카드 구독
-    RE->>RE: 인메모리 인덱스로 관련 flow O(1) 조회
-    RE->>RE: FILTER_NODE(SpEL/시간대/빈도제한) 평가
+    RE->>Redis: location_id로 Flow 캐시(로컬 사본) 조회
+    RE->>RE: FILTER_NODE(SpEL/시간대/빈도제한/AND) 평가
+    opt Filter(AND, cross-sensor)인 경우
+        RE->>Redis: correlation key로 상태 SET/DEL, 전체 충족 여부 MGET
+    end
     alt 모든 조건 충족
         RE->>Core: DEVICE_CONTROL_ACTION (Feign, 동기)
         RE->>Notify: EXTERNAL_NOTIFICATION_ACTION (베스트 에포트)
@@ -342,12 +355,131 @@ sequenceDiagram
 | PostgreSQL (서비스별 독립) | 마스터 데이터, 설정, 로그성 데이터(임계 이력 아님) | 트랜잭션/정합성 필요, Database-per-Service로 장애·트래픽 격리 |
 | InfluxDB | 센서 원시 시계열, 액추에이터 상태 시계열 | 고빈도 쓰기·시간 범위 쿼리에 특화, RDB에 적재 시 트래픽 폭증 시 병목 |
 | Caffeine(인메모리 캐시) | `group_id`/`location_id` 매핑, Rule Engine flow 인덱스 | 반복 조회 병목 제거, 서비스 재시작 시 재구성되는 휘발성 캐시로 충분 |
+| Rule Engine Redis | Flow 캐시(`location_id→List<Flow>`), 인스턴스 Heartbeat, Filter(AND, cross-sensor) 상태 | 다중 인스턴스 간 공유가 필요한 상태이므로 Caffeine이 아닌 공유 저장소 필요 |
 | ShedLock | 정각 통계 배치, 주간/월간 리포트 배치, 기상청 캐시 갱신 배치 | 멀티 인스턴스(Eureka) 환경에서 동일 배치 중복 실행 방지 |
 
 <br/>
 
+## 🔧 파트별 아키텍처 — Engine (Rule Engine)
+
+<details>
+<summary><b>Engine(아키텍처 · 요구사항 명세서 · 기능 테이블)</b></summary>
+<br/>
+
+<details>
+<summary>Engine 아키텍처</summary>
+<br/>
+
+Rule Engine은 **고정 2인스턴스(A/B) active-active**로 운영되며, 파티션 라우팅은 애플리케이션 코드가 아니라 **RabbitMQ Consistent Hash Exchange**가 담당한다. 같은 `location_id`는 항상 같은 인스턴스로 가므로, 서로 다른 센서 간 AND 판별에 필요한 상태를 별도의 분산 락 없이 다룰 수 있다.
+
+```mermaid
+flowchart LR
+    Core[Core] -->|"routing key = location_id"| CHX{{Consistent Hash Exchange}}
+    CHX --> Q1[Q1 - location_id 홀수 대역]
+    CHX --> Q2[Q2 - location_id 짝수 대역]
+
+    subgraph InstA[Engine Instance A]
+        RA[Router<br/>Flow 캐시 조회·디스패치] --> FRA[FlowRunner]
+        FRA --> ANDA["Filter AND cross-sensor<br/>correlation key"]
+    end
+    subgraph InstB[Engine Instance B]
+        RB[Router] --> FRB[FlowRunner]
+        FRB --> ANDB["Filter AND cross-sensor<br/>correlation key"]
+    end
+
+    Q1 --> RA
+    Q2 --> RB
+
+    Redis[("Redis<br/>Flow 캐시 · Heartbeat · AND 상태")]
+    InstA <-.-> Redis
+    InstB <-.-> Redis
+
+    FRA --> Action[Action 발행]
+    FRB --> Action
+    Action -->|"DEVICE_CONTROL / ALERT (Feign)"| CoreOut[Core]
+    Action -->|"AI_SUGGESTION (이벤트)"| AIOut[AI 서비스]
+    Action -->|"EXTERNAL_NOTIFICATION"| NotifyOut[Telegram/SMTP]
+
+    Outbox[Flow 생성·수정·삭제<br/>Outbox 패턴] -.->|pub/sub 캐시 갱신| Redis
+```
+
+**핵심 설계 결정**
+
+| 항목 | 결정 | 사유 |
+|---|---|---|
+| 파티션 계산 | RabbitMQ Consistent Hash Exchange (routing key = location_id) | 애플리케이션 레벨 해시 계산·Router 컴포넌트 불필요, Core-Engine 결합 최소화 |
+| 인스턴스 수 | 고정 2대, active-active | 현재 트래픽 규모에서 동적 확장 불필요(NFR-12), 평시 각 인스턴스 부하 50% 미만 전제 |
+| 장애 감지 | Redis TTL 기반 Heartbeat (초 단위) | Eureka 기본 감지 주기(최대 90초)는 실시간 처리에 부적합, 전역 설정 변경 없이 Engine 자체 보완 |
+| 장애 시 동작 | 생존 인스턴스가 상대방 파티션 큐 즉시 추가 구독 | RabbitMQ 큐는 소비자가 없어도 메시지를 보존하므로 흡수만으로 복구 가능 |
+| 복구 시 동작 | 연속 5회(약 5초) 안정 확인 후 반납 | Flapping(반복 흡수/반납) 방지 |
+| Filter(같은 패킷 다중 필드) | 상태 저장 없음, 동기 순차 평가 | 같은 패킷·같은 location_id로 도착해 지연/누락 시나리오가 구조적으로 없음 |
+| Filter(서로 다른 센서 간 AND) | Redis SET/DEL 상시 반영 (TRUE/FALSE 모두) | 비동기 도착 값을 정합성 있게 판별. 트래픽 부하 리스크 있어 구현 시점 대안(로컬메모리+배치백업) 평가 예정 |
+| Flow 캐시 동기화 | Outbox 패턴 (DB 트랜잭션 + 이벤트 발행 분리) | DB 커밋과 캐시 갱신 이벤트 발행 사이의 정합성을 분산 트랜잭션 없이 보장 |
+
+</details>
+
+<details>
+<summary>Engine 요구사항 명세서</summary>
+<br/>
+
+#### 기능 요구사항
+
+| ID | 요구사항 | 설명 | 우선순위 |
+|---|---|---|---|
+| RE-FR-01 | Flow CRUD | Flow 생성/조회/수정/삭제, 상태(DRAFT/ACTIVE/INACTIVE/ARCHIVED) 관리 | 상 |
+| RE-FR-02 | Node/Link DAG 저장 | TRIGGER_NODE/FILTER_NODE/ACTION_NODE로 구성된 DAG, 저장 시점 순환 검증 | 상 |
+| RE-FR-03 | SpEL 조건 평가 | `SimpleEvaluationContext`로 제한해 임의 코드 실행(RCE) 차단 | 상 |
+| RE-FR-04 | Filter(Multi-AND) | 같은 패킷 다중 필드, 센서가 전송하는 필드 개수만큼 동적 규칙 구성, 상태 저장 불필요 | 상 |
+| RE-FR-05 | Filter(AND, cross-sensor) | 서로 다른 센서(최대 3개) 비동기 값 판별, correlation key 기반 Redis 상태 | 상 |
+| RE-FR-06 | Action 발행 | DEVICE_CONTROL/ALERT(Feign 동기), AI_SUGGESTION(이벤트), EXTERNAL_NOTIFICATION(베스트에포트) | 상 |
+| RE-FR-07 | 조건 미충족 폐기 | false 판정은 별도 저장 없이 폐기 (원본은 Core가 InfluxDB에 별도 저장) | 상 |
+| RE-FR-08 | 파티션 라우팅 | Consistent Hash Exchange로 location_id 기준 Q1/Q2 분배 | 상 |
+| RE-FR-09 | Flow-센서 매핑 디스패치 | location_id로 Redis Flow 캐시 조회, devName 일치 Flow 실행 | 상 |
+| RE-FR-10 | Flow 캐시 동기화 | Outbox 패턴으로 각 인스턴스 로컬 캐시 atomic swap | 상 |
+| RE-FR-11 | 인스턴스 장애 감지 | Redis TTL Heartbeat 상호 폴링 | 상 |
+| RE-FR-12 | 장애 시 큐 흡수/복구 | 생존 인스턴스가 상대 파티션 흡수, 복구 시 debounce 후 반납 | 상 |
+| RE-FR-13 | 반복 알림 제한(TIMER_FILTER) | `SET fired:{key} true EX <ttl> NX`로 원자적 중복 발동 방지, 조건 재확인 시 리셋 | 중 |
+| RE-FR-14 | DLQ 관측 | 메시지 TTL 초과 시 DLQ 적재, 자동 장애판단 아닌 관측 전용 | 중 |
+
+#### 비기능 요구사항
+
+| ID | 분류 | 요구사항 | 비고 |
+|---|---|---|---|
+| RE-NFR-01 | 실시간성 | 평시 이벤트 처리는 로컬 메모리 우선 | latency 목표치 벤치마크 필요 |
+| RE-NFR-02 | 가용성 | 배포 시 트래픽 손실 없는 인스턴스 교체 | graceful shutdown 시 상태 flush |
+| RE-NFR-03 | 이중화 | 고정 2인스턴스 active-active | 평시 부하 50% 미만 전제 (미검증) |
+| RE-NFR-04 | 확장성 범위 | 3개 이상 인스턴스 동적 확장 미지원 | 의도적 스코프 제한 |
+| RE-NFR-05 | 보안 | SpEL RCE 차단 | 필수 |
+| RE-NFR-06 | 손실 허용 범위 | Filter(AND, cross-sensor)는 Redis 상시 반영으로 손실 없음 | Redis 장애 시 판정 지연 리스크, 대안 평가 예정 |
+| RE-NFR-07 | 라우팅 전략 예외 | 전체 MSA는 Eureka+라운드로빈, Engine만 파티션 키 라우팅 | 상태 기반 스트림 처리 특성상 예외 |
+| RE-NFR-08 | 장애 감지 속도 | Eureka 기본 주기 대신 Redis Heartbeat 병행 | 전역 설정 변경 없음 |
+| RE-NFR-09 | Flapping 방지 | 복구 반납 전 연속 5회 안정 확인 | 제안 기본값, 조정 가능 |
+
+</details>
+
+<details>
+<summary>Engine 기능 테이블</summary>
+<br/>
+
+| 기능ID | 기능명 | 입력 | 처리 | 출력 | 관련 컴포넌트 |
+|---|---|---|---|---|---|
+| RE-F-01 | Flow 저장 | 사용자 정의 Flow | DAG 검증 → DB 트랜잭션(flows+outbox) 커밋 | 저장 결과, outbox 이벤트 | API, DB, Outbox |
+| RE-F-02 | Flow 캐시 반영 | outbox 이벤트 | Poller 조회 → Redis pub/sub 발행 → 인스턴스 구독 | 로컬 캐시 atomic swap | Outbox Poller, Redis |
+| RE-F-03 | 이벤트 파티셔닝 | 센서 이벤트, location_id | Consistent Hash Exchange 해시 링 매핑 | Q1/Q2 물리 분리 | Core, RabbitMQ |
+| RE-F-04 | Flow-센서 매핑 디스패치 | location_id, devName | Redis 캐시 조회, devName 일치 Flow 탐색 | 실행 대상 Flow 목록 | Router |
+| RE-F-05 | Filter(leaf) 판별 | 필드값, SpEL 조건 | SpEL 평가 | true/false | FILTER_NODE |
+| RE-F-06 | Filter(Multi-AND) 판별 | 한 패킷의 여러 필드값 | 순차 SpEL 평가, 상태 없음 | true/false | FILTER_NODE |
+| RE-F-07 | Filter(AND, cross-sensor) 판별 | 비동기 도착 값, correlation key | Redis SET/DEL/MGET | true/false | FILTER_NODE, Redis |
+| RE-F-08 | 반복 알림 제한 | 판정 결과, node_id+location_id | Redis fired 플래그 NX/DEL | 발동 여부 | Redis |
+| RE-F-09 | Action 발행 | 최종 판정 결과 | 목적지별 메시지/호출 구성 | Feign 호출/이벤트/외부발송 | ACTION_NODE |
+| RE-F-10 | 폐기 처리 | false 판정 신호 | 별도 저장 없이 종료 | 없음 | FILTER_NODE |
+| RE-F-11 | 인스턴스 장애 감지/흡수 | Redis heartbeat 키 | TTL 만료 감지 → 파티션 큐 추가 구독 | 생존 인스턴스 전체 처리 | Redis, RabbitMQ |
+
+</details>
+
+</details>
 <br/>
 
 ## 🛠️ 기술 스택
 
-`Java` · `Spring Boot` · `Spring AI` · `Thymeleaf` · `PostgreSQL` · `InfluxDB` · `RabbitMQ` · `ChirpStack (LoRaWAN)` · `MQTT`
+`Java` · `Spring Boot` · `Spring AI` · `Thymeleaf` · `PostgreSQL` · `InfluxDB` · `RabbitMQ` · `ChirpStack (LoRaWAN)` · `MQTT` · `Redis`
