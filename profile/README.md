@@ -141,10 +141,14 @@ InsightOn은 오피스 공간에 설치된 IoT 센서·액추에이터를 실시
 
 | ID | 요구사항 | 상세 설명 / 수용 기준 | 우선순위 | 의존성 |
 |---|---|---|---|---|
-| FR-24 | 초대 토큰 셀프 가입 | 토큰 입력 가입 시 항상 `group_role='MEMBER'`로 고정. 관리자는 토큰 재발급(로테이션) 가능, 재발급 즉시 이전 토큰 무효화 | Must | Auth↔Core 내부 API(`/internal/groups/join-by-token`) |
-| FR-25 | 역할 기반 접근 제어 | OWNER/ADMIN/MEMBER 3단계 최소 구현, 화면/API별 접근 권한 매트릭스는 별도 문서화 필요(`TBD`) | Must | Auth 권한 모델 |
-| FR-26 | 이메일/소셜 로그인 | 이메일+비밀번호, OAuth(제공자 `TBD`) | Must | Auth `users_credentials`/`oauth` |
-
+| FR-24 | 회원가입/로그인 | 이메일+비밀번호 가입(BCrypt 해시, 이메일 소문자 정규화·중복 거부). 로그인 성공 시 Access·Refresh 발급, 실패 사유는 계정 열거 방지를 위해 통합 응답. 5회 연속 실패 시 5분 잠금 | Must | Auth `users`/`users_credentials` |
+| FR-25 | 소셜 로그인/계정 연동 | OAuth(제공자 `TBD`). 미연결 수단인데 동일 이메일 계정이 존재하면 연동 여부 질의 → 동의 시 기존 비밀번호로 본인 확인 후 연결, 거부 시 가입 중단 및 기존 수단 안내(동일 이메일 복수 계정 생성 금지) | Must | Auth `oauth_accounts` |
+| FR-26 | 토큰 발급·검증 | RS256 비대칭키 서명, Access `TBD`분/Refresh 14일, 권한 클레임 포함. Access=프론트 메모리, Refresh=httpOnly 쿠키+Redis. Gateway가 서명·만료·권한 검증 후 `X-User-Id`, `X-User-Role` 전달(매 요청 저장소 조회 없음) | Must | Redis, Gateway |
+| FR-27 | 재발급·로그아웃 | Access 만료 시 Refresh 회전 재발급(Redis 조회는 재발급 시점에만), 폐기된 Refresh 재제출 시 해당 사용자 계열 전체 무효화. 로그아웃은 클라이언트 토큰 제거 + 서버 Refresh 폐기, Access는 front 폐기 | Must |  |
+| FR-28 | 계정 관리 | 아이디 찾기(마스킹 표시), 비밀번호 찾기(일회성·만료 링크), 비밀번호 변경, 내 정보 조회·수정 및 연결 수단 관리(마지막 수단 해제 불가), 탈퇴(물리 삭제 대신 상태 전환·이력 보존). 비밀번호 변경·재설정·탈퇴 시 Refresh 폐기 | Must | 메일 발송, FR-04 |
+| FR-29 | 역할 기반 접근 제어 | ADMIN/MEMBER 2단계, 가입 시 기본 MEMBER. 토큰 권한 클레임으로 인가 판단, 권한 부족 시 403. ADMIN이 구성원 목록 조회·역할 변경·블록 가능(다음 토큰 재발급 시 반영). 화면/API별 접근 권한 다름 | Must | Auth 권한 모델 |
+| FR-30 | 장비 제어 인가 | 에어컨·공기청정기 등 장비 제어 API는 ADMIN만 호출 가능, MEMBER 요청은 403 반환. 민감 등급 제어에 대한 재인증(step-up) 적용 여부 `TBD` | Must | FR-06, Core 제어 API |
+| FR-31 | 이력·보안 | 로그인/로그아웃/정보변경 시 IP·User-Agent 기록(3개월 초과 삭제, 토큰·비밀번호 원문 저장 금지). 인증 이벤트를 `login_success`/`login_failed`/`logout`/`token_refreshed`/`session_expired`로 구분 기록, 장비 제어는 감사 로그 별도. 휴면 전환은 스케줄러+Redis 분산 락 | Must | 로그 저장소, 스케줄러 |
 #### 2.9 비기능 요구사항
 
 | ID | 구분 | 요구사항 | 수용 기준 / 측정 방법 | 우선순위 |
