@@ -209,54 +209,7 @@ InsightOn은 오피스 공간에 설치된 IoT 센서·액추에이터를 실시
 ### 3.1 컨테이너 다이어그램
 
 MSA(5개 마이크로서비스) 구조로, 서비스 간 물리 DB는 완전히 분리되고 논리 키 매핑으로 연동됩니다. 화살표에는 프로토콜과 동기(●)/비동기(○) 여부 표기
-
-```mermaid
-flowchart TB
-    subgraph Ext["외부 시스템"]
-        Sim["가상 센서 시뮬레이터"]
-        ChirpStack["ChirpStack (LoRaWAN)"]
-        KMA["기상청 API"]
-        Notify["Telegram Bot / SMTP"]
-    end
-
-    subgraph Platform["InsightOn MSA"]
-        GW["Gateway<br/>단일 진입점 · 라우팅/부하분산"]
-        Auth["Auth 서비스"]
-        Core["Core 서비스<br/>MQTT 수집·가공, 대시보드·제어 API"]
-        RE["Rule Engine 서비스<br/>고정 2인스턴스, 워크플로우 저장·평가"]
-        AI["AI/분석 서비스<br/>통계 결산, LLM 제안/리포트"]
-
-        AuthDB[("Auth PostgreSQL")]
-        CoreDB[("Core PostgreSQL")]
-        Influx[("InfluxDB")]
-        REDB[("Rule Engine PostgreSQL")]
-        RERedis[("Rule Engine Redis<br/>Flow 캐시·Heartbeat·AND 상태")]
-        AIDB[("AI PostgreSQL")]
-        MQ{{"RabbitMQ<br/>Topic Exchange"}}
-    end
-
-    Client["웹 클라이언트"] -- "HTTPS ●" --> GW
-    GW -- "HTTP ●" --> Auth
-    GW -- "HTTP ●" --> Core
-    GW -- "HTTP ●" --> RE
-    GW -- "HTTP ●" --> AI
-
-    Sim --> ChirpStack -- "MQTT ○" --> Core
-    Auth --- AuthDB
-    Core --- CoreDB
-    Core -- "적재 ○ (Fail-Silent)" --> Influx
-    Core -- "발행 telemetry.{groups_id} ○" --> MQ
-    MQ -- "구독 telemetry.# ○" --> RE
-    RE --- REDB
-    RE --- RERedis
-    RE -- "제어 API 호출 ●(Feign)" --> Core
-    RE -- "이벤트 발행/API 호출 ○●" --> AI
-    RE -- "외부 알림 ○(베스트에포트)" --> Notify
-    AI --- AIDB
-    AI -- "통계 조회 ●(Feign)" --> Core
-    AI -- "날씨 조회 ●" --> KMA
-    AI -- "제어 API 호출 ●(Feign)" --> Core
-```
+![insighton](../resources/insighton.png)
 
 | 컴포넌트 | 책임 | 데이터 저장소 |
 |---|---|---|
