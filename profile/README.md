@@ -247,7 +247,7 @@ sequenceDiagram
         RE->>Redis: correlation key로 상태 SET/DEL, 전체 충족 여부 MGET
     end
     alt 모든 조건 충족
-        RE->>Core: DEVICE_CONTROL_ACTION (Feign, 동기)
+        RE->>Core: DEVICE_CONTROL_ACTION (MQ, 비동기)
         RE->>Notify: EXTERNAL_NOTIFICATION_ACTION (베스트 에포트)
     else 조건 불충족
         RE-->>RE: 종료(다음 메시지 대기)
@@ -274,7 +274,7 @@ sequenceDiagram
         AI->>AI: suggestion_logs(is_accepted=null) 저장
         AI-->>User: 대시보드 배너 노출
         User->>AI: 수락
-        AI->>Core: action_payload 기반 제어 API 호출 (Feign, 동기)
+        AI->>Core: action_payload 기반 제어 API 호출 (MQ, 비동기)
     else locations.auto_control_mode = AI_DIRECT
         AI->>AI: suggestion_logs(is_accepted=true) 저장
         AI->>Core: 제어 API 즉시 호출 (Feign, 동기)
