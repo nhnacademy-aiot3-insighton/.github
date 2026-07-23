@@ -266,7 +266,7 @@ sequenceDiagram
     participant User
 
     RE->>AI: AI_SUGGESTION_ACTION 이벤트 발행
-    AI->>Core: 시간별 통계 조회 (Feign, 동기)
+    AI->>Core: 시간별 통계 조회 (MQ, 비동기)
     AI->>KMA: 현재 날씨/1시간 예보/미세먼지 조회
     AI->>LLM: 컨텍스트 결합 프롬프트 호출
     LLM-->>AI: 자연어 가이드 + action_payload
