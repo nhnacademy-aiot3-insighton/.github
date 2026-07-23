@@ -322,6 +322,8 @@ sequenceDiagram
 <details>
 <summary>Engine 아키텍처</summary>
 <br/>
+    
+![Engine Architecture](../resources/engine-architecture-ver2.png)
 
 Rule Engine은 **고정 2인스턴스(A/B) active-active**로 운영되며, 파티션 라우팅은 애플리케이션 코드가 아니라 **RabbitMQ Consistent Hash Exchange**가 담당한다. 같은 `location_id`는 항상 같은 인스턴스로 가므로, 서로 다른 센서 간 AND 판별에 필요한 상태를 별도의 분산 락 없이 다룰 수 있다.
 
