@@ -209,7 +209,7 @@ InsightOn은 오피스 공간에 설치된 IoT 센서·액추에이터를 실시
 ### 3.1 컨테이너 다이어그램
 
 MSA(5개 마이크로서비스) 구조로, 서비스 간 물리 DB는 완전히 분리되고 논리 키 매핑으로 연동됩니다. 화살표에는 프로토콜과 동기(●)/비동기(○) 여부 표기
-![insighton](../resources/insighton22.png)
+![insighton](../resources/insighton2.png)
 
 | 컴포넌트 | 책임 | 데이터 저장소 |
 |---|---|---|
