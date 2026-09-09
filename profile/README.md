@@ -26,14 +26,14 @@
 
 | 프로필 | GitHub | 이름 | 담당 파트 |
 |:---:|:---|:---|:---|
-| <img src="https://github.com/dayea11.png" width="80" height="80" style="border-radius:50%"/> | [@dayea11](https://github.com/dayea11) | | |
-| <img src="https://github.com/hiadela0802.png" width="80" height="80" style="border-radius:50%"/> | [@hiadela0802](https://github.com/hiadela0802) | | |
-| <img src="https://github.com/Jungeunsun565.png" width="80" height="80" style="border-radius:50%"/> | [@Jungeunsun565](https://github.com/Jungeunsun565) | | |
-| <img src="https://github.com/naeun912.png" width="80" height="80" style="border-radius:50%"/> | [@naeun912](https://github.com/naeun912) | | |
-| <img src="https://github.com/OiJs.png" width="80" height="80" style="border-radius:50%"/> | [@OiJs](https://github.com/OiJs) | | |
-| <img src="https://github.com/SRIOUSS.png" width="80" height="80" style="border-radius:50%"/> | [@SRIOUSS](https://github.com/SRIOUSS) | | |
-| <img src="https://github.com/Wjdwodud2525.png" width="80" height="80" style="border-radius:50%"/> | [@Wjdwodud2525](https://github.com/Wjdwodud2525) | | |
-| <img src="https://github.com/wognlrla.png" width="80" height="80" style="border-radius:50%"/> | [@wognlrla](https://github.com/wognlrla) | | |
+| <img src="https://github.com/dayea11.png" width="80" height="80" style="border-radius:50%"/> | [@dayea11](https://github.com/dayea11) | 김다애 | Core |
+| <img src="https://github.com/hiadela0802.png" width="80" height="80" style="border-radius:50%"/> | [@hiadela0802](https://github.com/hiadela0802) | 박현준 | RuleEngine |
+| <img src="https://github.com/Jungeunsun565.png" width="80" height="80" style="border-radius:50%"/> | [@Jungeunsun565](https://github.com/Jungeunsun565) | 정은선 | Auth |
+| <img src="https://github.com/naeun912.png" width="80" height="80" style="border-radius:50%"/> | [@naeun912](https://github.com/naeun912) | 김나은 | Core |
+| <img src="https://github.com/OiJs.png" width="80" height="80" style="border-radius:50%"/> | [@OiJs](https://github.com/OiJs) | 이준서 | Core |
+| <img src="https://github.com/SRIOUSS.png" width="80" height="80" style="border-radius:50%"/> | [@SRIOUSS](https://github.com/SRIOUSS) | 조창희 | Infra |
+| <img src="https://github.com/Wjdwodud2525.png" width="80" height="80" style="border-radius:50%"/> | [@Wjdwodud2525](https://github.com/Wjdwodud2525) | 정재영 | RuleEngine |
+| <img src="https://github.com/wognlrla.png" width="80" height="80" style="border-radius:50%"/> | [@wognlrla](https://github.com/wognlrla) | 김재휘 | Core |
 <br/>
 
 
